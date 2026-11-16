@@ -1,0 +1,53 @@
+pipeline {
+    agent any
+
+    tools {
+        terraform 'terraform-1.8'
+    }
+
+    environment {
+        AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
+        AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
+        AWS_DEFAULT_REGION    = 'us-east-1'
+    }
+
+    stages {
+        stage('Checkout & Validate') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform init'
+                    sh 'terraform validate'
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform plan -out=tfplan'
+                }
+            }
+        }
+
+        stage('Approval Gate') {
+            steps {
+                input message: 'Review terraform plan above. Approve provisioning EC2?', ok: 'Deploy Infrastructure'
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform apply -auto-approve tfplan'
+                    sh 'terraform output -raw ec2_public_ip > ../ec2_ip.txt'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}

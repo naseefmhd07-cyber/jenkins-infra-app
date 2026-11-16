@@ -1,0 +1,48 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'EC2_HOST', defaultValue: '', description: 'Public IP of the EC2 Instance')
+    }
+
+    stages {
+        stage('Validate Target') {
+            steps {
+                script {
+                    if (!params.EC2_HOST) {
+                        error "EC2_HOST parameter is required! Provide the IP from the Infrastructure pipeline output."
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to EC2 via SSH') {
+            steps {
+                sshagent(['ec2-ssh-key']) {
+                    sh """
+                        # Create app directory on target EC2
+                        ssh -o StrictHostKeyChecking=no ec2-user@${params.EC2_HOST} "mkdir -p ~/app"
+
+                        # Copy app files to EC2
+                        scp -o StrictHostKeyChecking=no -r app/* ec2-user@${params.EC2_HOST}:~/app/
+
+                        # Build and restart Docker container on EC2
+                        ssh -o StrictHostKeyChecking=no ec2-user@${params.EC2_HOST} '''
+                            cd ~/app
+                            docker build -t node-sample-app .
+                            docker stop sample-running-app || true
+                            docker rm sample-running-app || true
+                            docker run -d --name sample-running-app -p 3000:3000 node-sample-app
+                        '''
+                    """
+                }
+            }
+        }
+
+        stage('Health Probe') {
+            steps {
+                sh "curl -m 10 http://${params.EC2_HOST}:3000/ || (echo 'Service unreachable' && exit 1)"
+            }
+        }
+    }
+}
